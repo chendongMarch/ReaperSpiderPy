@@ -2,7 +2,7 @@
 import pymongo
 
 
-class MongoUtils:
+class MongoHelper:
     name = 'unname'
 
     def __init__(self, name):

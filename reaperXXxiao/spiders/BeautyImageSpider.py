@@ -1,18 +1,22 @@
 # coding:utf-8
-import scrapy
-from MongoUtils import *
-from scrapy import Request
-from scrapy.selector import Selector
 import re
 import time
 
+import scrapy
+from scrapy import Request
+from scrapy.selector import Selector
+from BaseSpider import BaseSpider
+from reaperXXxiao.helper.MongoHelper import *
 
-class FirstSpider(scrapy.spiders.Spider):
+
+# xxxiao.com 的图片爬虫，爬取专辑和照片详情
+class BeautyImageSpider(BaseSpider):
     def __init__(self):
         pass
 
     name = "xxxiao"
     allowed_domains = ["m.xxxiao.com"]
+
     base_new = "http://m.xxxiao.com"
     base_xinggan = "http://m.xxxiao.com/cat/xinggan"
     base_shaonv = "http://m.xxxiao.com/cat/shaonv"
@@ -20,6 +24,7 @@ class FirstSpider(scrapy.spiders.Spider):
     base_wmxz = "http://m.xxxiao.com/cat/wmxz"
     base_wallpaper = "http://m.xxxiao.com/cat/wallpaper"
     base_swmt = "http://m.xxxiao.com/cat/swmt"
+
     start_urls = [
         base_new,
         base_xinggan,
@@ -29,18 +34,11 @@ class FirstSpider(scrapy.spiders.Spider):
         base_swmt,
         base_wallpaper
     ]
-    time_stamp = time.strftime("%Y%m%d%H%M", time.localtime())
+
     findSize_reg = re.compile(r'-(\d+)x(\d+)')
 
-    #  防止页面重定向
-    def make_requests_from_url(self, url):
-        return Request(url, dont_filter=True, meta={
-            'dont_redirect': True,
-            'handle_httpstatus_list': [301, 302]
-        })
-
     # 获取数据库存储引用
-    db = MongoUtils.getDb()
+    db = MongoHelper.getDb()
 
     # 推荐专辑 数据库集合,记录的首页分类型的推荐
     # 字段:
@@ -48,7 +46,8 @@ class FirstSpider(scrapy.spiders.Spider):
     # album_link : 指向专辑详情的链接,通过这个链接作为主键,可以查询,这个专辑的详情
     # album_cover : 专辑的封面,图片链接
     # album_desc : 专辑的描述
-    coll_album_recommend = MongoUtils.getCol(db, 'album_recommend')
+    # time_stamp:时间戳
+    coll_album_recommend = MongoHelper.getCol(db, 'album_recommend')
 
     # 全部专辑 数据库集合,抽取的所有爬到的专辑列表
     # 字段:
@@ -56,13 +55,19 @@ class FirstSpider(scrapy.spiders.Spider):
     # key_words : 关键字
     # album_cover : 专辑的封面,图片链接
     # album_desc : 专辑的描述
-    coll_album_whole = MongoUtils.getCol(db, 'album_whole')
+    # time_stamp:时间戳
+    coll_album_whole = MongoHelper.getCol(db, 'album_whole')
 
     # 详情 数据库集合,每一条字段存储一张图片
     # 字段:
+    # width: 宽度
+    # height: 高度
     # album_link : 属于哪一个专辑
     # photo_src : 图片链接
-    coll_album_detail = MongoUtils.getCol(db, 'album_detail')
+    # album_link: 专辑链接
+    # photo_src: 图片链接
+    # time_stamp:时间戳
+    coll_album_detail = MongoHelper.getCol(db, 'album_detail')
 
     # 解析专辑详情页面,存储album_detail,album_whole
     def parse_detail(self, response):
@@ -108,7 +113,7 @@ class FirstSpider(scrapy.spiders.Spider):
                 'album_link': album_link,
                 'photo_src': photo_src,
                 'time_stamp': self.time_stamp}
-            MongoUtils.updateOrInsert(self.coll_album_detail, detail_save)
+            MongoHelper.updateOrInsert(self.coll_album_detail, detail_save)
         # whole专辑存入
         whole_save = {
             'album_link': album_link,
@@ -116,7 +121,7 @@ class FirstSpider(scrapy.spiders.Spider):
             'album_cover': photo_src,
             'album_desc': album_desc,
             'time_stamp': self.time_stamp}
-        MongoUtils.updateOrInsert(self.coll_album_whole, whole_save)
+        MongoHelper.updateOrInsert(self.coll_album_whole, whole_save)
 
     # 解析推荐页面,存储album_recommend
     def parse(self, response):
@@ -124,7 +129,7 @@ class FirstSpider(scrapy.spiders.Spider):
         selector = Selector(response)
         for line in selector.xpath('//div[@class="post-thumb"]'):
             album_link = self.code(line.xpath('a[1]/@href').extract()[0])
-            # yield Request(album_link, callback=self.parse_detail)
+            yield Request(album_link, callback=self.parse_detail)
             album_cover = self.code(line.xpath('a[1]/img/@src').extract()[0])
             album_desc = self.code(line.xpath('a[1]/img/@alt').extract()[0])
             recommend_save = {
@@ -133,7 +138,7 @@ class FirstSpider(scrapy.spiders.Spider):
                 'album_desc': album_desc,
                 'album_type': album_type,
                 'time_stamp': self.time_stamp}
-            MongoUtils.updateOrInsert(self.coll_album_recommend, recommend_save)
+            MongoHelper.updateOrInsert(self.coll_album_recommend, recommend_save)
 
     # 根据url生成album_type
     def generateAlbumType(self, url):
@@ -152,16 +157,9 @@ class FirstSpider(scrapy.spiders.Spider):
         elif url == self.base_swmt:
             return 'swmt'
 
-    @staticmethod
-    def code(unicode):
-        # replace_reg = re.compile(r'-\d(.*).jpg')
-        # url = replace_reg.sub('.jpg', unicode.encode())
-        # return url
-        return unicode.encode()
-
     # 检测这个链接是否已经被爬去过了
     def isScrapyIt(self, album_link):
         check = {
             'album_link': album_link
         }
-        return MongoUtils.isExistWhole(self.coll_album_whole, check)
+        return MongoHelper.isExistWhole(self.coll_album_whole, check)
